@@ -1,12 +1,16 @@
-from .agent import Agent
+"""
+This module implements the normal evolutionary algorithm (not boosted)
+"""
 import time
 import os.path as osp
+
+from .base import Agent
 
 
 class EvoAgent(Agent):
 
-    def __init__(self, y_fname):
-        Agent.__init__(self, y_fname)
+    def __init__(self, fname):
+        Agent.__init__(self, fname)
         self.k = self.agent_params['k']
         self.max_n_gen = self.agent_params['max_n_gen']
 

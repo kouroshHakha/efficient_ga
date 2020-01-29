@@ -1,12 +1,14 @@
-from util import Design
 import random
 import math
 from deap import tools
+
 from .ea import EA
+from ..util.ga import Design
 
 class CustomEA(EA):
 
     def __init__(self, cxpb, mutpb, eval_core):
+        EA.__init__(self, cxpb, mutpb, eval_core)
         self.eval_core = eval_core
         self.cxpb = cxpb
         self.mutpb = mutpb

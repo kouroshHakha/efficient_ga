@@ -1,12 +1,17 @@
+"""
+This module implements the BagNet algorithm
+"""
 import importlib
-from .agent import Agent
 import time
 import os.path as osp
 
-class DeepCKTAgent(Agent):
+from .base import Agent
 
-    def __init__(self, y_fname):
-        Agent.__init__(self, y_fname)
+
+class BagNetAgent(Agent):
+
+    def __init__(self, fname):
+        Agent.__init__(self, fname)
 
         model_module = importlib.import_module(self.specs['model_module_name'])
         model_cls = getattr(model_module, self.specs['model_class_name'])
