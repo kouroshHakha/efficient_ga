@@ -7,7 +7,6 @@ from copy import deepcopy
 import os.path as osp
 
 from .base import Agent
-from ..helper_module import DecisionBox
 from ..util.ga import is_x_better_than_y
 
 
@@ -23,13 +22,11 @@ class OracleAgent(Agent):
         self.max_iter = self.specs['max_iter']
 
         self.n_new_samples = self.specs['n_new_samples']
-        self.decision_box = DecisionBox(self.specs['ref_dsn_idx'],
-                                        self.bb_env,
-                                        self._logger)
+
         # paper stuff variables
         self.n_queries = 0
         self.query_time = 0
-        self.n_queries_list, self.query_time_list, self.total_time_list  = [], [], []
+        self.n_queries_list, self.query_time_list, self.total_time_list = [], [], []
         self.oracle_save_to = self.specs.get("oracle_save_to", None)
         if self.oracle_save_to:
             self.oracle_queries = dict(
@@ -40,14 +37,14 @@ class OracleAgent(Agent):
             for kwrd in self.bb_env.spec_range.keys():
                 self.oracle_queries[kwrd] = []
 
-    def run(self):
-
-        self.decision_box.update_heuristics(self.db, self.k)
+    def run_per_iter(self):
+        db_list = list(self.db)
+        self.decision_box.update_heuristics(db_list, self.k)
 
         if self.decision_box.has_converged():
             return [], True
 
-        parent1, parent2, ref_design = self.decision_box.get_parents_and_ref_design(self.db, self.k)
+        parent1, parent2, ref_design = self.decision_box.get_parents_and_ref_design(db_list, self.k)
 
         offsprings = []
         n_iter = 0
@@ -56,34 +53,28 @@ class OracleAgent(Agent):
         self.log("[INFO] running model ... ")
         q_start = time.time()
 
-        self.ea.prepare_for_generation(self.db, self.k)
+        self.ea.prepare_for_generation(db_list, self.k)
+
         while len(offsprings) < self.n_new_samples and n_iter < self.max_iter:
             new_designs = self.ea.get_next_generation_candidates(parent1, parent2)
 
             for new_design in new_designs:
-                if any([(new_design == row) for row in self.db]) or \
-                        any([(new_design == row) for row in offsprings]):
+                if new_design in self.db or new_design in offsprings:
                     # if design is already in the design pool skip ...
-                    self.log("[debug] design {} already exists".format(new_design))
+                    self.debug(f"design {new_design} already exists")
                     continue
 
                 n_iter += 1
-                design_result = self.bb_env.evaluate([new_design])[0]
-                if design_result['valid']:
-                    new_design.cost = design_result['cost']
-                    for key in new_design.specs.keys():
-                        new_design.specs[key] = design_result[key]
-                    is_new_design_better_oracle = [is_x_better_than_y(self.bb_env,
-                                                                      new_design.specs[kwrd],
-                                                                      ref_design.specs[kwrd],
-                                                                      kwrd) for kwrd in
-                                                   self.decision_box.critical_specs]
+                new_design = self.bb_env.evaluate([new_design])[0]
+                if new_design['valid']:
+                    all_better = True
+                    for kwrd in self.decision_box.critical_specs:
+                        new = new_design.specs[kwrd]
+                        ref = ref_design.specs[kwrd]
+                        all_better = all_better & is_x_better_than_y(self.bb_env, new, ref, kwrd)
 
-                    if all(is_new_design_better_oracle):
+                    if all_better:
                         offsprings.append(new_design)
-                        self.log("[debug] design {} with cost {} was added".format(
-                            new_design, new_design.cost))
-                        self.log("{}".format(new_design.specs))
 
                     if self.oracle_save_to:
                         self.store_oracle_query(new_design, ref_design,
@@ -98,8 +89,10 @@ class OracleAgent(Agent):
 
         self.log(30*"-")
 
-        self.log("[INFO] new designs tried: %d" % n_iter)
-        self.log("[INFO] new candidates size: %d " % len(offsprings))
+        self.info(f"New designs tried: {n_iter}")
+        self.info(f"New candidates size: {len(offsprings)}")
+        for child in offsprings:
+            self.info(f"Added: {child} , cost = {child['cost']}")
 
         return offsprings, False
 
@@ -118,22 +111,21 @@ class OracleAgent(Agent):
         start = time.time()
 
         self.get_init_population()
-        import pdb
-        pdb.set_trace()
         self.data_set_list.append(self.db)
         self.query_time_list.append(self.query_time)
         self.n_queries_list.append(self.n_queries)
         self.total_time_list.append(0)
 
         for i in range(self.max_n_retraining):
-            offsprings, is_converged = self.run()
+            self.info(f'********** Iter {i} **********')
+            offsprings, is_converged = self.run_per_iter()
 
             if is_converged:
                 break
             elif len(offsprings) == 0:
                 continue
 
-            self.db = self.db + offsprings
+            self.db.extend(offsprings)
             self.data_set_list.append(offsprings)
             self.query_time_list.append(self.query_time)
             self.n_queries_list.append(self.n_queries)
@@ -142,30 +134,29 @@ class OracleAgent(Agent):
             self.store_database_and_times()
 
             # adjust dataset size for training, if not desired, comment the agent.k_top= ... line
-            self.db = sorted(self.db, key=lambda x: x.cost)
-            worst_offspring = max(offsprings, key=lambda x: x.cost)
-            self.log('[INFO] k_top alternative: {}'.format(self.db.index(
-                worst_offspring)))
-            self.k = max(self.n_init_samples, self.db.index(worst_offspring))
+            db_sorted = sorted(self.db, key=lambda x: x['cost'])
+            worst_offspring = max(offsprings, key=lambda x: x['cost'])
+            self.info(f'k_top alternative: {db_sorted.index(worst_offspring)}')
+            self.k = max(self.n_init_samples, db_sorted.index(worst_offspring))
 
-            self.log("[INFO] n_queries = {}".format(self.n_queries))
-            self.log("[INFO] query_time = {}".format(self.query_time))
-            self.log("[INFO] total_time = {}".format(time.time()-start))
+            self.info(f"Nqueries = {self.n_queries}")
+            self.info(f"Query_time = {self.query_time}")
+            self.info(f"Total_time = {time.time()-start}")
 
         self._logger.store_db(self.data_set_list)
 
-        sorted_db = sorted(self.db, key=lambda x: x.cost)
+        sorted_db = sorted(self.db, key=lambda x: x['cost'])
         # paper stuff
-        self.log("[finished] n_queries = {}".format(self.n_queries))
-        self.log("[finished] query_time = {}".format(self.query_time))
-        self.log("[finished] total_time = {}".format(time.time()-start))
-        self.log("[finished] total_n_evals = {}".format(len(self.db)))
-        self.log("[finished] best_solution = {}".format(sorted_db[0]))
-        self.log("[finished] id = {}".format(sorted_db[0].id))
-        self.log("[finished] cost = {}".format(sorted_db[0].cost))
-        self.log("[finished] performance \n{} ".format(sorted_db[0].specs))
+        self.info(f"Nqueries = {self.n_queries}")
+        self.info(f"Query_time = {self.query_time}")
+        self.info(f"Total_time = {time.time()-start}")
+        self.info(f"Total_n_evals = {len(self.db)}")
+        self.info(f"Best_solution = {sorted_db[0]}")
+        self.info(f"id = {sorted_db[0]['id']}")
+        self.info(f"Cost = {sorted_db[0]['cost']}")
+        self.info(f"Performance \n{sorted_db[0].specs} ")
         for ind in sorted_db[:self.decision_box.ref_index]:
-            self.log("{} -> {} -> {}".format(ind, ind.cost, ind.specs))
+            self.log(f"{ind}, cost = {ind['cost']}")
 
     def store_database_and_times(self):
         dict_to_save = dict(
