@@ -9,18 +9,17 @@ import numpy as np
 import warnings
 from pathlib import Path
 
-from ..logger import Logger
-
 from utils.file import read_yaml
 from utils.importlib import import_class
 from utils.data.database import Database
 
-from ..ea.ea import EA
 from bb_eval_engine.util.importlib import import_bb_env
 from bb_eval_engine.data.design import Design
 from bb_eval_engine.base import EvaluationEngineBase
 
-from ..helper_module import DecisionBox
+from ..ea.ea import EA
+from ..util.logger import Logger
+from ..decisionbox import DecisionBox
 
 
 class Agent:
@@ -65,26 +64,16 @@ class Agent:
     def debug(self, msg: str):
         self._logger.debug(msg)
 
-    def get_init_population(self, re_sim: bool = False):
-        # load/create db
-        # if re_sim is False and self.init_data_path.exists():
-        #     self.db = read_pickle(self.init_data_path)
-        # else:
+    def get_init_population(self):
         init_designs = self.bb_env.generate_rand_designs(self.n_init_samples, evaluate=True)
         self.db.extend(init_designs)
-        # write_pickle(self.init_data_path, self.db)
 
         if len(self.db) < self.n_init_samples:
             warnings.warn('Number of init_samples is larger than the length of the initial '
                           'database, using the len(db) instead of n_init_samples', RuntimeWarning)
 
-        # self.db = clean(self.db, self.bb_env)
-        # self.db = relable(self.db, self.bb_env)
         db_sorted = sorted(self.db, key=lambda x: x['cost'])
-        # HACK for paper
-        # self.db = self.db[1:]
         self._logger.log_text(f'[INFO] Best cost in init_pop = {db_sorted[0]["cost"]}')
-
 
     def _set_seed(self, seed: int):
         """override to initialize other libraries of use. e.g. pytorch"""

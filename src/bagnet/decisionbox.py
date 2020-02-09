@@ -1,3 +1,5 @@
+from typing import List
+
 import random
 
 
@@ -14,7 +16,7 @@ class DecisionBox:
         self.critical_spec_kwrd = None
         self.pop_dict = dict()
 
-    def _find_pop(self, db, k_top):
+    def _find_pop(self, db: List[object], k_top):
         """
         :param db: list of designs
         :return:
@@ -24,7 +26,7 @@ class DecisionBox:
         assert k_top <= len(db), "ktop={} should be smaller than " \
                                  "train_set_len={}".format(k_top, len(db))
         pop = dict()
-        pop['cost'] = sorted(db, key=lambda x: x.cost)[:k_top]
+        pop['cost'] = sorted(db, key=lambda x: x['cost'])[:k_top]
         for kwrd in self.spec_range.keys():
             spec_min, spec_max, _ = self.spec_range[kwrd]
             reverse = True if spec_min is not None else False
@@ -32,7 +34,7 @@ class DecisionBox:
 
         return pop
 
-    def _find_ciritical_pop(self, db, specs, k_top):
+    def _find_ciritical_pop(self, db: List[object], specs, k_top):
         """
         specs is a list of strings indicating the spec_kwrds that have been important.
         This function looks at db and returns a list of designs sorted by the cumulative
@@ -54,11 +56,11 @@ class DecisionBox:
         critical_pop = [db[i] for i in indices[:k_top]]
         return critical_pop
 
-    def _find_critic_spec(self, db, k_top):
+    def _find_critic_spec(self, db: List[object], k_top):
         penalty = {}
         worst_specs = {}
         if len(self.critical_specs) == 0:
-            pop = sorted(db, key=lambda x: x.cost)[:k_top]
+            pop = sorted(db, key=lambda x: x['cost'])[:k_top]
         else:
             pop = self._find_ciritical_pop(db, self.critical_specs, k_top)
 
@@ -95,9 +97,9 @@ class DecisionBox:
                 critical_spec_kwrd = spec
                 break
 
-        self.logger.log_text('worst_specs: {}'.format(worst_specs))
-        self.logger.log_text('penalties of worst_specs: {}'.format(penalty))
-        self.logger.log_text('critical_spec_kwrd: {}'.format(critical_spec_kwrd))
+        self.logger.log_text(f'worst_specs: {worst_specs}')
+        self.logger.log_text(f'penalties of worst_specs: {penalty}')
+        self.logger.log_text(f'critical_spec_kwrd: {critical_spec_kwrd}')
         return critical_spec_kwrd
 
     def _compute_critical_penalties(self, designs, specs):
@@ -112,7 +114,7 @@ class DecisionBox:
 
         return sum_penalties
 
-    def update_heuristics(self, db, k_top):
+    def update_heuristics(self, db: List[object], k_top):
 
         self.pop_dict = self._find_pop(db, k_top)
         # extract the most influential spec on cost function
@@ -129,12 +131,13 @@ class DecisionBox:
         self.logger.log_text('[debug] critical_specs: {}'.format(self.critical_specs))
         self.pop_dict['critical_specs'] = self._find_ciritical_pop(db, self.critical_specs, k_top)
 
-    def get_parents_and_ref_design(self, db, k_top):
+    def get_parents_and_ref_design(self, db: List[object], k_top):
         ref_design = self.pop_dict['critical_specs'][self.ref_index]
 
         self.logger.log_text(30*"-")
-        self.logger.log_text("[debug] ref design {} -> {}".format(ref_design, ref_design.cost))
-        self.logger.log_text("[debug] {}".format(ref_design.specs))
+        specs = {k: ref_design[k] for k in self.eval_core.spec_range}
+        self.logger.log_text(f"[debug] ref design {ref_design} -> {ref_design['cost']}")
+        self.logger.log_text(f'[debug] {specs}')
 
         all_crit_specs_except_last = self.critical_specs.copy()
         all_crit_specs_except_last.remove(self.critical_spec_kwrd)

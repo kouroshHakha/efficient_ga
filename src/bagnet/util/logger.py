@@ -4,9 +4,13 @@ import time
 from shutil import copyfile
 import pickle
 
+from colorama import init
+from termcolor import colored
+
 class Logger:
 
     def __init__(self, log_path, time_stamped=True):
+        init()
         if os.path.isfile(log_path):
             raise ValueError('{} is not a file path, please provide a directory path')
 
@@ -43,6 +47,14 @@ class Logger:
             printfn(str)
 
         stream.close()
+
+    def debug(self, str, stream_to_file=True, stream_to_stdout=True, pretty=False, fpath=None):
+        msg = colored('[DEBUG] ', 'red') + str
+        self.log_text(msg, stream_to_file, stream_to_stdout, pretty, fpath)
+
+    def info(self, str, stream_to_file=True, stream_to_stdout=True, pretty=False, fpath=None):
+        msg = colored('[INFO] ', 'green') + str
+        self.log_text(msg, stream_to_file, stream_to_stdout, pretty, fpath)
 
 
     def store_db(self, db, fpath=None):
