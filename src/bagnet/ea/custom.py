@@ -2,8 +2,8 @@ import random
 import math
 from deap import tools
 
-from .ea import EA
-from ..util.ga import Design
+from .ea import EA, genocide, set_parents_and_sibling
+
 
 class CustomEA(EA):
 
@@ -34,16 +34,18 @@ class CustomEA(EA):
             ind1 = parent1.copy()
             ind2 = parent2.copy()
             ind1, ind2 = self._mate(ind1, ind2, low=self.lows, up=self.ups)
-            Design.genocide(ind1, ind2)
-            ind1.set_parents_and_sibling(parent1, parent2, ind2)
-            ind2.set_parents_and_sibling(parent1, parent2, ind1)
+            ind1.clear_specs()
+            ind2.clear_specs()
+            set_parents_and_sibling(ind1, parent1, parent2, ind2)
+            set_parents_and_sibling(ind2, parent1, parent2, ind1)
             offsprings += [ind1, ind2]
         elif op_choice < self.cxpb + self.mutpb:      # Apply mutation
             parent1 = self._select_for_mut_based_on_order(parents1)
             new_ind = parent1.copy()
             new_ind, = self._mutate(new_ind, low=self.lows, up=self.ups)
-            Design.genocide(new_ind)
-            new_ind.set_parents_and_sibling(parent1, None, None)
+            new_ind.clear_specs()
+            genocide(new_ind)
+            set_parents_and_sibling(new_ind, parent1, None, None)
             offsprings.append(new_ind)
 
         return offsprings
