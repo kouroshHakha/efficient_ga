@@ -1,11 +1,13 @@
 import random
 import numpy as np
-from util import is_x_better_than_y, BatchGenerator
+from ..util.ga import is_x_better_than_y
+from ..util.iterators import BatchIndexIterator
 from .model import Model
 import tensorflow as tf
 import pandas as pd
 import pickle
 import os
+
 
 class SimpleModel(Model):
 
@@ -18,6 +20,7 @@ class SimpleModel(Model):
                  learning_rate=None,
                  **kwargs,
                  ):
+        Model.__init__(self, **kwargs)
         self.num_params_per_design = num_params_per_design
         self.spec_kwrd_list = spec_kwrd_list
         self.feat_ext_dim_list = [num_params_per_design] + feat_ext_hidden_dim_list
@@ -95,8 +98,8 @@ class SimpleModel(Model):
                                   name='mu', trainable=False)
             self.std = tf.Variable(tf.zeros([self.num_params_per_design], dtype=tf.float32),
                                    name='std', trainable=False)
-            input1_norm = (self.input1 - self.mu) / (self.std + tf.constant(1e-6))
-            input2_norm = (self.input2 - self.mu) / (self.std + tf.constant(1e-6))
+            input1_norm = (self.input1 - self.mu) / (self.std + tf.constant(1e-15))
+            input2_norm = (self.input2 - self.mu) / (self.std + tf.constant(1e-15))
 
         return input1_norm, input2_norm
 
@@ -110,7 +113,7 @@ class SimpleModel(Model):
         return layer
 
     def _sym_fc_layer(self, input_data, layer_dim, activation_fn=None, reuse=False, scope='sym_fc'):
-        assert input_data.shape[1]%2==0
+        assert input_data.shape[1] % 2==0
 
         with tf.variable_scope(scope):
             weight_elements = tf.get_variable(name='W', shape=[input_data.shape[1]//2, layer_dim],
@@ -198,12 +201,21 @@ class SimpleModel(Model):
         self._build_computation_graph()
         self._init_tf_sess()
 
-    def get_train_valid_ds(self, db, k_top, eval_core, validation_frac):
+    def get_train_valid_ds(self, db, k, eval_core, validation_frac):
+        """
+        There are four possible ways to do this:
+        1. sort the database, choose top k, where k can be adjusted from outside in case error
+        is too large in low cost regions
+        2. sort the database, choose top k (i.e. 100)
+        3. Randomly picks k elements in db and constructs the model training set, the
+        remaining un-chosen elements will not contribute to gradient updates in this round.
+        4. construct the training set based on the entire db and shuffle it. In the batch update,
+        take constant number of gradient updates. In this way, all elements in db can contribute.
+        """
 
-        assert k_top <= len(db), "ktop={} should be smaller than " \
-                                 "train_set_len={}".format(k_top, len(db))
-
-        db_cost_sorted = sorted(db, key=lambda x: x.cost)[:k_top]
+        train_db = list(db)
+        # train_db = random.choices(db, k=k)
+        # db_cost_sorted = sorted(db, key=lambda x: x['cost'])[:k]
 
         category = {}
         nn_input1, nn_input2 = [], []
@@ -211,26 +223,26 @@ class SimpleModel(Model):
         for kwrd in self.spec_kwrd_list:
             category[kwrd], nn_labels[kwrd] = [], []
 
-        n = len(db_cost_sorted)
+        n = len(train_db)
         for i in range(n-1):
             for j in range(i+1, n):
                 rnd = random.random()
                 if rnd < 0.5:
-                    nn_input1.append(db_cost_sorted[i])
-                    nn_input2.append(db_cost_sorted[j])
+                    nn_input1.append(train_db[i])
+                    nn_input2.append(train_db[j])
                     for kwrd in self.spec_kwrd_list:
                         label = 1 if is_x_better_than_y(eval_core=eval_core,
-                                                        x=db_cost_sorted[i].specs[kwrd],
-                                                        y=db_cost_sorted[j].specs[kwrd],
+                                                        x=train_db[i].specs[kwrd],
+                                                        y=train_db[j].specs[kwrd],
                                                         kwrd=kwrd) else 0
                         category[kwrd].append(label)
                 else:
-                    nn_input1.append(db_cost_sorted[j])
-                    nn_input2.append(db_cost_sorted[i])
+                    nn_input1.append(train_db[j])
+                    nn_input2.append(train_db[i])
                     for kwrd in self.spec_kwrd_list:
                         label = 0 if is_x_better_than_y(eval_core=eval_core,
-                                                        x=db_cost_sorted[i].specs[kwrd],
-                                                        y=db_cost_sorted[j].specs[kwrd],
+                                                        x=train_db[i].specs[kwrd],
+                                                        y=train_db[j].specs[kwrd],
                                                         kwrd=kwrd) else 1
                         category[kwrd].append(label)
 
@@ -241,9 +253,9 @@ class SimpleModel(Model):
         nn_input1 = np.array(nn_input1)
         nn_input2 = np.array(nn_input2)
 
-        self.logger.log_text("[INFO] dataset size:%d" % len(db))
-        self.logger.log_text("[INFO] ktop: %d" % k_top)
-        self.logger.log_text("[INFO] combine size:%d" % len(nn_input1))
+        self.logger.info(f"Dataset size: {len(db)}")
+        self.logger.info(f"K : {k}")
+        self.logger.info(f"Combine size: {len(nn_input1)}")
 
         permutation = np.random.permutation(len(nn_input1))
         nn_input1 = nn_input1[permutation]
@@ -277,7 +289,7 @@ class SimpleModel(Model):
         }
         return ds
 
-    def train(self, data_set, batch_size, num_epochs, ckpt_step, log_step):
+    def train(self, data_set, batch_size, ngrad_step_per_run, ckpt_step, log_step):
 
         train_input1 = data_set['training_ds']['train_input1']
         train_input2 = data_set['training_ds']['train_input2']
@@ -289,63 +301,63 @@ class SimpleModel(Model):
         train_mean = np.mean(np.concatenate([train_input1, train_input2], axis=0), axis=0)
         train_std = np.std(np.concatenate([train_input1, train_input2], axis=0), axis=0)
 
-        batch_generator = BatchGenerator(len(train_input1), batch_size)
+        batch_generator = BatchIndexIterator(len(train_input1), batch_size)
         total_n_batches = int(len(train_input1) // batch_size)
 
-        self.logger.log_text("[info] training the model with dataset ....")
-        self.logger.log_text("[info] number of total batches: %d" % total_n_batches)
+        self.logger.info("Training the model with dataset ....")
+        self.logger.info(f"Number of total batches: {total_n_batches}")
         self.logger.log_text(30*"-")
 
         self.mu.assign(train_mean).op.run()
         self.std.assign(train_std).op.run()
 
-        for epoch in range(num_epochs+1):
-            avg_loss, avg_train_acc, avg_valid_acc = {}, {}, {}
-            avg_total_loss = 0.
+        loss_list, train_acc_list, valid_acc_list = {}, {}, {}
+        for kwrd in self.spec_kwrd_list:
+            loss_list[kwrd] = []
+            train_acc_list[kwrd] = []
+            valid_acc_list[kwrd] = []
+
+        total_loss_list = []
+
+        # ngrad_step_per_run = 1000
+        for iter_cnt in range(ngrad_step_per_run):
+
+            index = batch_generator.next()
+            batch_input1, batch_input2 = train_input1[index], train_input2[index]
+            feed_dict = {self.input1         :batch_input1,
+                         self.input2         :batch_input2}
+            for kwrd in self.spec_kwrd_list:
+                feed_dict[self.true_labels[kwrd]] = train_labels[kwrd][index]
+
+            _, l, t_l, train_acc = self.sess.run([self.update_op, self.loss,
+                                                  self.total_loss, self.accuracy],
+                                                 feed_dict=feed_dict)
+
+            feed_dict = {self.input1         :valid_input1,
+                         self.input2         :valid_input2}
 
             for kwrd in self.spec_kwrd_list:
-                avg_loss[kwrd] = 0.
-                avg_train_acc[kwrd] = 0.
-                avg_valid_acc[kwrd] = 0.
+                feed_dict[self.true_labels[kwrd]] = valid_labels[kwrd]
 
-            for iter in range(total_n_batches):
-                index = batch_generator.next()
-                batch_input1, batch_input2 = train_input1[index], train_input2[index]
-                feed_dict = {self.input1         :batch_input1,
-                             self.input2         :batch_input2}
-                for kwrd in self.spec_kwrd_list:
-                    feed_dict[self.true_labels[kwrd]] = train_labels[kwrd][index]
+            valid_acc, = self.sess.run([self.accuracy], feed_dict=feed_dict)
 
-                _, l, t_l, train_acc = self.sess.run([self.update_op, self.loss,
-                                                      self.total_loss, self.accuracy],
-                                                     feed_dict=feed_dict)
+            for kwrd in self.spec_kwrd_list:
+                total_loss_list.append(t_l)
+                loss_list[kwrd].append(l[kwrd])
+                train_acc_list[kwrd].append(train_acc[kwrd])
+                valid_acc_list[kwrd].append(valid_acc[kwrd])
 
-                feed_dict = {self.input1         :valid_input1,
-                             self.input2         :valid_input2}
-
-                for kwrd in self.spec_kwrd_list:
-                    feed_dict[self.true_labels[kwrd]] = valid_labels[kwrd]
-
-                valid_acc, = self.sess.run([self.accuracy], feed_dict=feed_dict)
-
-                for kwrd in self.spec_kwrd_list:
-                    avg_total_loss += t_l / total_n_batches
-                    avg_loss[kwrd] += l[kwrd] / total_n_batches
-                    avg_train_acc[kwrd] += train_acc[kwrd] / total_n_batches
-                    avg_valid_acc[kwrd] += valid_acc[kwrd] / total_n_batches
-
-            if epoch % ckpt_step == 0:
+            if iter_cnt % ckpt_step == 0:
                 self.logger.store_model(self.saver, self.sess)
-            if epoch % log_step == 0:
+            if iter_cnt % log_step == 0:
                 self.logger.log_text(10*"-")
-                self.logger.log_text("[epoch %d] total_loss: %f " %(epoch, avg_total_loss))
+                self.logger.log_text(f"[iter {iter_cnt}] total_loss: {np.mean(total_loss_list)}")
                 for kwrd in self.spec_kwrd_list:
-                    self.logger.log_text("".format(kwrd))
-                    self.logger.log_text("[%s] loss: %f" %(kwrd, avg_loss[kwrd]))
-                    self.logger.log_text("[%s] train_acc = %.2f%%, "
-                                         "valid_acc = %.2f%%" %(kwrd,
-                                                                avg_train_acc[kwrd]*100,
-                                                                avg_valid_acc[kwrd]*100))
+                    self.logger.log_text(f"{kwrd}")
+                    self.logger.log_text(f"[{kwrd}] loss: {np.mean(loss_list[kwrd])}")
+                    self.logger.log_text(f"[{kwrd}] "
+                                         f"train_acc = {np.mean(train_acc_list[kwrd]) * 100:.2f}%,"
+                                         f"valid_acc = {np.mean(valid_acc_list[kwrd]) * 100:.2f}%")
         if self.evaluate_flag:
             self.evaluate()
 

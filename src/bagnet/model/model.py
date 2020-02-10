@@ -2,6 +2,9 @@ import abc
 
 class Model(metaclass=abc.ABCMeta):
 
+    def __init__(self, *args, **kwargs):
+        pass
+
     @abc.abstractmethod
     def init(self):
         """

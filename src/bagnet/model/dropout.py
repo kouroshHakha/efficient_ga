@@ -1,4 +1,4 @@
-from .vannilla import SimpleModel
+from .simple import SimpleModel
 import tensorflow as tf
 import numpy as np
 import os.path as osp
