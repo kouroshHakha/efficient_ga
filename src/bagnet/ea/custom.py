@@ -8,8 +8,7 @@ from .ea import EA, genocide, set_parents_and_sibling
 class CustomEA(EA):
 
     def __init__(self, cxpb, mutpb, eval_core):
-        EA.__init__(self, cxpb, mutpb, eval_core)
-        self.eval_core = eval_core
+        EA.__init__(self, eval_core)
         self.cxpb = cxpb
         self.mutpb = mutpb
 

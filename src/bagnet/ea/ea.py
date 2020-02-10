@@ -4,8 +4,8 @@ from bb_eval_engine.data.design import Design
 
 class EA:
 
-    def __init__(self, *args, **kwargs) -> None:
-        pass
+    def __init__(self, eval_core, *args, **kwargs) -> None:
+        self.eval_core = eval_core
 
     def get_next_generation_candidates(self, *args, **kwargs):
         raise NotImplementedError
