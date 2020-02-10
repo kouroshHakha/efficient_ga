@@ -71,7 +71,6 @@ class BagNetAgent(Agent):
         self.info("Running model ... ")
         q_start = time.time()
 
-        while_time = 0
         gen_time = 0
         check_time = 0
         q_time = 0

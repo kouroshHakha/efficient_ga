@@ -319,7 +319,6 @@ class SimpleModel(Model):
 
         total_loss_list = []
 
-        # ngrad_step_per_run = 1000
         for iter_cnt in range(ngrad_step_per_run):
 
             index = batch_generator.next()

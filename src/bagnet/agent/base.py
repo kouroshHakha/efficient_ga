@@ -24,7 +24,20 @@ from ..decisionbox import DecisionBox
 
 class Agent:
 
-    def __init__(self, fname: Union[str, Path]):
+    def __init__(self, fname: Union[str, Path]) -> None:
+        """
+        Parameters
+        ----------
+        fname: Path
+            Yaml Path. It should contain the following fields:
+                outputs
+                bb_env
+                agent_params
+                    n_init_samples
+                    ref_dsn_idx
+                ea_cls
+                ea_params
+        """
 
         _params = read_yaml(fname)
         self.specs = _params['agent_params']
@@ -42,11 +55,7 @@ class Agent:
         self.ea = ea_cls(**_params['ea_params'], eval_core=self.bb_env)
 
         self._logger = Logger(log_path=_params['outputs'])
-        # self._logger.store_settings(fname, self.specs['circuit_yaml_file'])
 
-        # self.circuit_content = read_yaml(self.specs['circuit_yaml_file'])
-        # self.init_pop_dir = self.circuit_content['database_dir']
-        # self.num_params_per_design = self.eval_core.num_params
 
         self.init_data_path = Path(_params['outputs']) / 'init_data.pickle'
         self.n_init_samples = self.specs['n_init_samples']
