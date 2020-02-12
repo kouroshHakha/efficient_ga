@@ -4,7 +4,7 @@ This one shares parameters across each spec's network so the information is shar
 """
 import numpy as np
 import random
-import tensorflow as tf
+# import tensorflow as tf
 import sys
 import time
 from copy import deepcopy, copy
@@ -321,7 +321,7 @@ class BatchGenerator(object):
             return indices
 
 
-def set_random_seed(seed):
-    tf.set_random_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+# def set_random_seed(seed):
+#     tf.set_random_seed(seed)
+#     np.random.seed(seed)
+#     random.seed(seed)

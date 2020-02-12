@@ -56,7 +56,7 @@ class Agent:
 
         self._logger = Logger(log_path=_params['outputs'])
 
-
+        self.output_path = Path(self._logger.log_path)
         self.init_data_path = Path(_params['outputs']) / 'init_data.pickle'
         self.n_init_samples = self.specs['n_init_samples']
 
