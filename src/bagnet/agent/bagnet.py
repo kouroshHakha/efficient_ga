@@ -7,7 +7,7 @@ import os.path as osp
 
 from utils.importlib import import_class
 from .base import Agent
-from ..model.model import Model
+from bagnet.model import Model
 
 
 class BagNetAgent(Agent):
@@ -18,7 +18,7 @@ class BagNetAgent(Agent):
         model_cls = cast(Type[Model], import_class(self.specs['model_cls']))
         self.model = model_cls(num_params_per_design=len(self.bb_env.params),
                                spec_kwrd_list=list(self.bb_env.spec_range.keys()),
-                               logger=self._logger,
+                               logger=self._logger, seed=self.seed,
                                **self.specs['model_params'])
 
         # get the parameters in specs that are related to the model

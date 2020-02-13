@@ -17,11 +17,11 @@ class DropOutModel(SimpleModel):
         if not drop_out_prob:
             drop_out_prob = tf.constant(self.keep_prob, dtype=tf.float32)
         layer = input_data
-        with tf.compat.v1.variable_scope(name):
+        with tf.variable_scope(name):
             for i, layer_dim in enumerate(self.feat_ext_dim_list[1:]):
-                layer = tf.compat.v1.layers.dense(layer, layer_dim, activation=tf.nn.relu,
+                layer = tf.layers.dense(layer, layer_dim, activation=tf.nn.relu,
                                         reuse=reuse, name='feat_fc'+str(i))
-                layer = tf.nn.dropout(layer, 1 - (drop_out_prob))
+                layer = tf.nn.dropout(layer, drop_out_prob)
         return layer
 
     def _comparison_model(self, input_data, drop_out_prob=None, name='compare_model', reuse=False):
@@ -29,11 +29,11 @@ class DropOutModel(SimpleModel):
             drop_out_prob = tf.constant(self.keep_prob, dtype=tf.float32)
         layer = input_data
         w_list, b_list = [], []
-        with tf.compat.v1.variable_scope(name):
+        with tf.variable_scope(name):
             for i, layer_dim in enumerate(self.compare_nn_dim_list[1:-1]):
                 layer, w, b = self._sym_fc_layer(layer, layer_dim, activation_fn='Relu',
                                                  reuse=reuse, scope=name+str(i))
-                layer = tf.nn.dropout(layer, 1 - (drop_out_prob))
+                layer = tf.nn.dropout(layer, drop_out_prob)
                 w_list.append(w)
                 b_list.append(b)
 

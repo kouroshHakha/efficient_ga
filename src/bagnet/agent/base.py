@@ -41,8 +41,8 @@ class Agent:
 
         _params = read_yaml(fname)
         self.specs = _params['agent_params']
-        seed = self.specs['seed']
-        self._set_seed(seed)
+        self.seed = self.specs['seed']
+        self._set_seed(self.seed)
 
         self.db: Database = Database(Design, allow_repeat=False)
         self.data_set_list = []

@@ -21,7 +21,6 @@ class SimpleModel(Model):
                  **kwargs,
                  ):
         Model.__init__(self, **kwargs)
-        self.seed = kwargs.get('seed', None)
         self.num_params_per_design = num_params_per_design
         self.spec_kwrd_list = spec_kwrd_list
         self.feat_ext_dim_list = [num_params_per_design] + feat_ext_hidden_dim_list
@@ -75,27 +74,26 @@ class SimpleModel(Model):
             os.remove(self.acc_txt_file)
 
     def _init_tf_sess(self):
-        self.saver = tf.compat.v1.train.Saver()
-        tf_config = tf.compat.v1.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
+        self.saver = tf.train.Saver()
+        tf_config = tf.ConfigProto(inter_op_parallelism_threads=1, intra_op_parallelism_threads=1)
         tf_config.gpu_options.allow_growth = True  # may need if using GPU
-        self.sess = tf.compat.v1.Session(config=tf_config)
+        self.sess = tf.Session(config=tf_config)
         self.sess.__enter__()  # equivalent to `with self.sess:`
-        tf.compat.v1.global_variables_initializer().run()  # pylint: disable=E1101
+        tf.global_variables_initializer().run()  # pylint: disable=E1101
 
     def _define_placeholders(self):
-        self.input1 = tf.compat.v1.placeholder(tf.float32, shape=[None, self.num_params_per_design],
+        self.input1 = tf.placeholder(tf.float32, shape=[None, self.num_params_per_design],
                                      name='in1')
-        self.input2 = tf.compat.v1.placeholder(tf.float32, shape=[None, self.num_params_per_design],
+        self.input2 = tf.placeholder(tf.float32, shape=[None, self.num_params_per_design],
                                      name='in2')
-
         self.true_labels = {}
 
         for kwrd in self.spec_kwrd_list:
-            self.true_labels[kwrd] = tf.compat.v1.placeholder(tf.float32, shape=[None, 2],
+            self.true_labels[kwrd] = tf.placeholder(tf.float32, shape=[None, 2],
                                                     name='labels_' + kwrd)
 
     def _normalize(self):
-        with tf.compat.v1.variable_scope('normalizer'):
+        with tf.variable_scope('normalizer'):
             self.mu = tf.Variable(tf.zeros([self.num_params_per_design], dtype=tf.float32),
                                   name='mu', trainable=False)
             self.std = tf.Variable(tf.zeros([self.num_params_per_design], dtype=tf.float32),
@@ -107,9 +105,9 @@ class SimpleModel(Model):
 
     def _feature_extraction_model(self, input_data, name='feature_model', reuse=False):
         layer = input_data
-        with tf.compat.v1.variable_scope(name):
+        with tf.variable_scope(name):
             for i, layer_dim in enumerate(self.feat_ext_dim_list[1:]):
-                layer = tf.compat.v1.layers.dense(layer, layer_dim, activation=tf.nn.relu,
+                layer = tf.layers.dense(layer, layer_dim, activation=tf.nn.relu,
                                         reuse=reuse, name='feat_fc'+str(i))
 
         return layer
@@ -117,11 +115,11 @@ class SimpleModel(Model):
     def _sym_fc_layer(self, input_data, layer_dim, activation_fn=None, reuse=False, scope='sym_fc'):
         assert input_data.shape[1] % 2==0
 
-        with tf.compat.v1.variable_scope(scope):
-            weight_elements = tf.compat.v1.get_variable(name='W', shape=[input_data.shape[1]//2, layer_dim],
-                                              initializer=tf.compat.v1.random_normal_initializer)
-            bias_elements = tf.compat.v1.get_variable(name='b', shape=[layer_dim//2],
-                                            initializer=tf.compat.v1.zeros_initializer)
+        with tf.variable_scope(scope):
+            weight_elements = tf.get_variable(name='W', shape=[input_data.shape[1]//2, layer_dim],
+                                              initializer=tf.random_normal_initializer)
+            bias_elements = tf.get_variable(name='b', shape=[layer_dim//2],
+                                            initializer=tf.zeros_initializer)
 
             Weight = tf.concat([weight_elements, weight_elements[::-1, ::-1]],
                                axis=0, name='Weights')
@@ -142,7 +140,7 @@ class SimpleModel(Model):
     def _comparison_model(self, input_data, name='compare_model', reuse=False):
         layer = input_data
         w_list, b_list = [], []
-        with tf.compat.v1.variable_scope(name):
+        with tf.variable_scope(name):
             for i, layer_dim in enumerate(self.compare_nn_dim_list[1:-1]):
                 layer, w, b = self._sym_fc_layer(layer, layer_dim, activation_fn='Relu',
                                                  reuse=reuse, scope=name+str(i))
@@ -172,20 +170,20 @@ class SimpleModel(Model):
         neg_likelihoods, self.loss = {}, {}
         self.out_predictions = {}
         for kwrd in self.spec_kwrd_list:
-            with tf.compat.v1.variable_scope("loss_"+kwrd):
+            with tf.variable_scope("loss_"+kwrd):
                 self.out_predictions[kwrd] = tf.nn.softmax(self.out_logits[kwrd])
                 neg_likelihoods[kwrd] = \
-                    tf.nn.softmax_cross_entropy_with_logits(labels=self.true_labels[kwrd],
+                    tf.nn.softmax_cross_entropy_with_logits_v2(labels=self.true_labels[kwrd],
                                                                logits=self.out_logits[kwrd])
-                self.loss[kwrd] = tf.reduce_mean(input_tensor=neg_likelihoods[kwrd])
+                self.loss[kwrd] = tf.reduce_mean(neg_likelihoods[kwrd])
                 self.total_loss += self.loss[kwrd]
 
     def _build_accuracy(self):
         self.accuracy = {}
         for kwrd in self.spec_kwrd_list:
-            correct_predictions = tf.equal(tf.argmax(input=self.out_predictions[kwrd], axis=1),
-                                           tf.argmax(input=self.true_labels[kwrd], axis=1))
-            self.accuracy[kwrd] = tf.reduce_mean(input_tensor=tf.cast(correct_predictions, tf.float32))
+            correct_predictions = tf.equal(tf.argmax(self.out_predictions[kwrd], axis=1),
+                                           tf.argmax(self.true_labels[kwrd], axis=1))
+            self.accuracy[kwrd] = tf.reduce_mean(tf.cast(correct_predictions, tf.float32))
 
     def _build_computation_graph(self):
 
@@ -195,16 +193,11 @@ class SimpleModel(Model):
         self._build_accuracy()
 
         if self.lr:
-            self.update_op = tf.compat.v1.train.AdamOptimizer(self.lr).minimize(self.total_loss)
+            self.update_op = tf.train.AdamOptimizer(self.lr).minimize(self.total_loss)
         else:
-            self.update_op = tf.compat.v1.train.AdamOptimizer().minimize(self.total_loss)
-
-    def _set_seed(self, seed: int):
-        tf.random.set_seed(seed)
+            self.update_op = tf.train.AdamOptimizer().minimize(self.total_loss)
 
     def init(self):
-        if self.seed:
-            self._set_seed(self.seed)
         self._build_computation_graph()
         self._init_tf_sess()
 
