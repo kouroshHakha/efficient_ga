@@ -35,6 +35,6 @@ if __name__ == '__main__':
     # Hacky plotting
     plot_cost([agent.data_set_list])
     plt.savefig(agent.output_path/'cost_vs_iter.png', dpi=200)
-    data = get_dataset(str(agent.output_path), time=True)
-    plot_cost_from_dict(data)
+    data = get_dataset(str(agent.output_path), time=True, old=False)
+    plot_cost_from_dict([data])
     plt.savefig(agent.output_path/'cost_vs_nquery.png', dpi=200)
