@@ -111,7 +111,7 @@ class OracleAgent(Agent):
         start = time.time()
 
         self.get_init_population()
-        self.data_set_list.append(self.db)
+        self.data_set_list.append(list(self.db))
         self.query_time_list.append(self.query_time)
         self.n_queries_list.append(self.n_queries)
         self.total_time_list.append(0)
