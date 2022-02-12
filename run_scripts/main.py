@@ -36,5 +36,5 @@ if __name__ == '__main__':
     plot_cost([agent.data_set_list])
     plt.savefig(agent.output_path/'cost_vs_iter.png', dpi=200)
     data = get_dataset(str(agent.output_path), time=True, old=False)
-    plot_cost_from_dict([data])
+    plot_cost_from_dict([data],x_axis='n_query') #bagnet option: change 'n_query' to 'n_nn_query'
     plt.savefig(agent.output_path/'cost_vs_nquery.png', dpi=200)
