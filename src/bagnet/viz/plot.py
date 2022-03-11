@@ -104,7 +104,7 @@ def print_best_design(data, legends):
         # print("{}: {} -> {}".format(legend, best_sol, best_sol.specs))
 
 
-def plot_cost_from_dict(data, x_axis='n_query', legends=None, ax=None):
+def plot_cost_from_dict(data, x_axis='n_nn_query', legends=None, ax=None):
     if ax is None:
         plt.close()
         ax = plt.gca()

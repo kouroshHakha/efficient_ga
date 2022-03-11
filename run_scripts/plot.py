@@ -1,10 +1,6 @@
 import matplotlib.pyplot as plt
-import seaborn as sns
-import os
-import pickle
-import numpy as np
-import math
-import pdb
+from utils.pdb import register_pdb_hook
+register_pdb_hook()
 
 from bagnet.viz.plot import (
     get_dataset, plot_everything, plot_cost_from_dict, plot_cost, print_best_design
@@ -19,12 +15,13 @@ if __name__ == '__main__':
 
     data = []
     for log_dir in args.logdir:
-        data.append(get_dataset(log_dir, False))
+        data.append(get_dataset(log_dir, time=True, old=False))
 
     # plot_everything(data, args.legend)
-    # plot_cost(data, args.legend)
-    plot_cost_from_dict(data)
-    plt.savefig('cost.png')
+    plot_cost([x['db'] for x in data], args.legend)
+    plt.savefig('cost_vs_niter.png')
+    # plot_cost_from_dict(data)
+    # plt.savefig('cost_vs_n_query.png')
     # print_best_design(data, args.legend)
     # plot_cost2(data, 'n_query', args.legend)
 
