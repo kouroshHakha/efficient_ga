@@ -9,12 +9,12 @@ from termcolor import colored
 
 class Logger:
 
-    def __init__(self, log_path, time_stamped=True):
+    def __init__(self, log_path, seed=0, time_stamped=True):
         init()
         if os.path.isfile(log_path):
             raise ValueError('{} is not a file path, please provide a directory path')
 
-        self.log_path = os.path.abspath(log_path)
+        self.log_path = os.path.join(os.path.abspath(log_path), f's_{seed}')
         if time_stamped:
             self.log_path = self.log_path + '_' + time.strftime("%d-%m-%Y_%H-%M-%S")
 

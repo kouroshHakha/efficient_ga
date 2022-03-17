@@ -54,7 +54,7 @@ class Agent:
         ea_cls = cast(Type[EA], import_class(_params['ea_cls']))
         self.ea = ea_cls(**_params['ea_params'], eval_core=self.bb_env)
 
-        self._logger = Logger(log_path=_params['outputs'])
+        self._logger = Logger(log_path=_params['outputs'], seed=self.seed)
 
         self.output_path = Path(self._logger.log_path)
         self.init_data_path = Path(_params['outputs']) / 'init_data.pickle'
