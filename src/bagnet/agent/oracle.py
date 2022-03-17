@@ -24,20 +24,22 @@ class OracleAgent(Agent):
         self.n_new_samples = self.specs['n_new_samples']
 
         # paper stuff variables
+        self.global_iteration = 0
         self.n_queries = 0
         self.query_time = 0
         self.n_queries_list, self.query_time_list, self.total_time_list = [], [], []
-        self.oracle_save_to = self.specs.get("oracle_save_to", None)
-        if self.oracle_save_to:
-            self.oracle_queries = dict(
-                inputs1=[],
-                inputs2=[],
-                critical_specs=[]
-            )
-            for kwrd in self.bb_env.spec_range.keys():
-                self.oracle_queries[kwrd] = []
+        self.save_queries = self.specs.get("save_queries", False)
+
+        self.oracle_queries = dict(
+            inputs1=[],
+            inputs2=[],
+            critical_specs=[],
+        )
+        for kwrd in self.bb_env.spec_range.keys():
+            self.oracle_queries[kwrd] = []
 
     def run_per_iter(self):
+        self.clear_queries()
         db_list = list(self.db)
         self.decision_box.update_heuristics(db_list, self.k)
 
@@ -76,9 +78,8 @@ class OracleAgent(Agent):
                     if all_better:
                         offsprings.append(new_design)
 
-                    if self.oracle_save_to:
-                        self.store_oracle_query(new_design, ref_design,
-                                                self.decision_box.critical_specs)
+                    self.update_queries(new_design, ref_design,
+                                        self.decision_box.critical_specs)
 
                 self.n_queries += 1
 
@@ -96,7 +97,7 @@ class OracleAgent(Agent):
 
         return offsprings, False
 
-    def store_oracle_query(self, input1, input2, critical_specs):
+    def update_queries(self, input1, input2, critical_specs):
         self.oracle_queries['inputs1'].append(deepcopy(input1))
         self.oracle_queries['inputs2'].append(deepcopy(input2))
         self.oracle_queries['critical_specs'].append(critical_specs.copy())
@@ -105,7 +106,14 @@ class OracleAgent(Agent):
                                                                 input1.specs[kwrd],
                                                                 input2.specs[kwrd],
                                                                 kwrd))
-        self._logger.store_db(self.oracle_queries, fpath=self.oracle_save_to)
+    
+    def clear_queries(self):
+        for key in self.oracle_queries:
+            self.oracle_queries[key] = []
+
+    def store_oracle_query(self):
+        self._logger.store_db(self.oracle_queries, 
+                              fpath=osp.join(self.output_path, f'oracle_qs_{self.global_iteration}.pkl' ))
 
     def main(self):
         start = time.time()
@@ -142,6 +150,9 @@ class OracleAgent(Agent):
             self.info(f"Nqueries = {self.n_queries}")
             self.info(f"Query_time = {self.query_time}")
             self.info(f"Total_time = {time.time()-start}")
+            if self.save_queries:
+                self.store_oracle_query()
+            self.global_iteration += 1
 
         self._logger.store_db(self.data_set_list)
 
