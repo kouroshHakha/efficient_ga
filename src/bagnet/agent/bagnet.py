@@ -4,6 +4,7 @@ This module implements the BagNet algorithm
 from typing import cast, Type, List
 import time
 import os.path as osp
+import random
 
 from utils.importlib import import_class
 from .base import Agent
@@ -32,6 +33,7 @@ class BagNetAgent(Agent):
         self.display_step = self.specs['display_step']
         self.ckpt_step = self.specs['ckpt_step']
         self.max_iter = self.specs['max_iter']
+        self.eps = self.specs['eps_greedy']
 
         self.n_new_samples = self.specs['n_new_samples']
         # paper stuff variables
@@ -107,8 +109,16 @@ class BagNetAgent(Agent):
                 decision_time += decision_e - decision_s
 
                 deletion_s = time.time()
+                # epsilon greedy exploration
+                # If model says its better add the design if not rely on eps_greedy
+                # with prob 1-eps rely on the model to ignore the new design with eps just add the new design anyway
+                # eps is usually small ~0.001-0.01
                 if is_new_design_better:
                     offsprings.append(new_design)
+                elif random.random() < self.eps:
+                    print('Ignored the model because of eps greedy!')
+                    offsprings.append(new_design)
+                
                 deletion_e = time.time()
                 deletion_time += deletion_e - deletion_s
 
@@ -123,8 +133,10 @@ class BagNetAgent(Agent):
         self.info("Avg_deletion_time = {}".format(deletion_time/n_iter))
         self.info("Avg_while_time = {}".format(while_time/n_iter))
 
-        if len(offsprings) < self.n_new_samples:
-            return offsprings, True
+        # if len(offsprings) < self.n_new_samples:
+        #     return offsprings, True
+        if len(offsprings) == 0:
+            return offsprings, False
 
         self.log(30*"-")
         s = time.time()
@@ -162,6 +174,7 @@ class BagNetAgent(Agent):
 
         for i in range(self.max_n_retraining):
             self.info(f'********** Iter {i} **********')
+            self.global_iter = i
             offsprings, is_converged = self.run_per_iter()
 
             if is_converged:
