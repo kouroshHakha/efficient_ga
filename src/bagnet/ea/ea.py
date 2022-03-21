@@ -14,6 +14,12 @@ class EA:
         raise NotImplementedError
 
 
+    def update_value_dict_offsprings_inplace(self, offsprings):
+        for child in offsprings:
+            for idx, (param_name, param_vec) in enumerate(self.eval_core.params_vec.items()):
+                child.value_dict[param_name] = param_vec[child[idx]]
+
+
 def set_parents_and_sibling(design: Design, parent1: Design, parent2: Optional[Design],
                             sibling: Optional[Design]):
     design['parent1'] = parent1

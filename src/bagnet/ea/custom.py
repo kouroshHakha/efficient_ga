@@ -47,6 +47,7 @@ class CustomEA(EA):
             set_parents_and_sibling(new_ind, parent1, None, None)
             offsprings.append(new_ind)
 
+        self.update_value_dict_offsprings_inplace(offsprings)
         return offsprings
 
     @staticmethod

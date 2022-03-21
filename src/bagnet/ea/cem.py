@@ -1,3 +1,4 @@
+from copy import deepcopy
 from scipy.stats import multivariate_normal
 from scipy.stats import gaussian_kde
 import numpy as np
@@ -22,6 +23,7 @@ class CEM(EA):
             self.kde = None
 
     def fit(self, data):
+        data = np.array([list(x) for x in data])
         if self.type == 'gaussian':
             self.mu = np.mean(data, axis=0)
             self.var = np.eye(data.shape[-1]) * 10
@@ -51,10 +53,12 @@ class CEM(EA):
             dsn = np.floor(dsn).astype(int)
             dsn = Design(dsn.tolist())
             dsns.append(dsn)
+        
+        self.update_value_dict_offsprings_inplace(dsns)
 
         return dsns
 
     def prepare_for_generation(self, db, n):
         # fit on top n/2
-        db = sorted(db, key=lambda x: x.cost)
+        db = sorted(db, key=lambda x: x['cost'])
         self.fit(db[:n//2])
