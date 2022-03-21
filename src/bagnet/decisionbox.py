@@ -176,5 +176,6 @@ class DecisionBox:
         # the reference design with 20% confidence percentage
         # is_new_design_worst = any([(random.random() < prediction[kwrd][0][0] and
         #                             prediction[kwrd][0][0] < 0.2) for kwrd in self.critical_specs])
+        # is_new_design_worst = all([prediction[kwrd][0][0] < 0.2 for kwrd in self.critical_specs])
         # is_new_design_better = not is_new_design_worst
         return is_new_design_better
