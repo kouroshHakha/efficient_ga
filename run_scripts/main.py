@@ -11,6 +11,8 @@ from bagnet.agent.base import Agent
 from bagnet.viz.plot import plot_cost, plot_cost_from_dict, get_dataset
 import matplotlib.pyplot as plt
 
+from bagnet.model.simple import ModelCheckpointNoOverride
+
 register_pdb_hook()
 
 
