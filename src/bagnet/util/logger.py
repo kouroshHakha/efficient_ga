@@ -7,27 +7,31 @@ import pickle
 from colorama import init
 from termcolor import colored
 
+from pathlib import Path
+
 class Logger:
 
     def __init__(self, log_path, seed=0, time_stamped=True):
         init()
-        if os.path.isfile(log_path):
+        if Path(log_path).is_file():
             raise ValueError('{} is not a file path, please provide a directory path')
 
-        self.log_path = os.path.join(os.path.abspath(log_path), f's_{seed}')
+        self.log_path = Path(log_path).absolute()
+        folder_name = f's_{seed}'
         if time_stamped:
-            self.log_path = self.log_path + '_' + time.strftime("%d-%m-%Y_%H-%M-%S")
+            folder_name += '_' + time.strftime("%d-%m-%Y_%H-%M-%S")
+        self.log_path /= folder_name
 
-        os.makedirs(self.log_path, exist_ok=True)
+        Path(self.log_path).mkdir(exist_ok=True, parents=True)
 
-        self.log_txt_fname = os.path.join(self.log_path, 'progress_log.txt')
-        if os.path.exists(self.log_txt_fname):
+        self.log_txt_fname = self.log_path / 'progress_log.txt'
+        if self.log_txt_fname.exists():
             os.remove(self.log_txt_fname)
 
-        self.log_db_fname = os.path.join(self.log_path, 'db.pkl')
+        self.log_db_fname = self.log_path / 'db.pkl'
 
-        log_model_path = os.path.join(self.log_path, 'checkpoint')
-        self.log_model_fname = os.path.join(log_model_path, 'checkpoint.ckpt')
+        log_model_path = self.log_path / 'checkpoint'
+        self.log_model_fname = log_model_path / 'checkpoint.ckpt'
 
 
     def log_text(self, str, stream_to_file=True, stream_to_stdout=True, pretty=False, fpath=None):
@@ -64,12 +68,22 @@ class Logger:
         with open(fpath, 'wb') as f:
             pickle.dump(db, f)
 
+    def store_model(self, *args):
+        if len(args) == 2:
+            self.store_model_tf(*args)
+        else:
+            self.store_model_torch(*args)
 
-    def store_model(self, tf_saver, tf_session):
-        tf_saver.save(tf_session, self.log_model_fname)
+    def store_model_tf(self, tf_saver, tf_session):
+        tf_saver.save(tf_session, str(self.log_model_fname))
+
+    def store_model_torch(self, model):
+        import torch
+        self.log_model_fname.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(model.state_dict(), self.log_model_fname)
 
     def store_settings(self, agent_yaml, circuit_yaml):
-        agent_fname = os.path.abspath(agent_yaml)
-        circuit_fname = os.path.abspath(circuit_yaml)
-        copyfile(agent_fname, os.path.join(self.log_path, 'agent.yaml'))
-        copyfile(circuit_fname, os.path.join(self.log_path, 'circuit.yaml'))
+        agent_fname = Path(agent_yaml).absolute()
+        circuit_fname = Path(circuit_yaml).absolute()
+        copyfile(agent_fname, self.log_path / 'agent.yaml')
+        copyfile(circuit_fname, self.log_path / 'circuit.yaml')
