@@ -13,19 +13,70 @@ import tqdm
 import torch
 from torch.optim import Adam
 
-from torch.utils.data import Dataset
+from torch.utils.data import Subset
 from torch.utils.data import DataLoader as VecLoader
 from torch_geometric.loader import DataLoader as GNNLoader
 from torch_geometric.loader.dataloader import Collater
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from cgl.bagnet_gnn.model import BagNetComparisonModel
-from cgl.bagnet_gnn.data import BagNetOnlineDataset, InputHandler
+from cgl.bagnet_gnn.data import BagNetDataset, BagNetOnlineDataset, InputHandler
 
 class ModelCheckpointNoOverride(ModelCheckpoint):
     """This checkpoint call back does not delete the already saved checkpoint"""
     def _del_model(self, filepath: str) -> None:
         pass
+
+
+class SimpleBagNetDataset(BagNetDataset):
+            
+    def __init__(self, design_list, eval_core, is_graph):
+        super().__init__(is_graph=is_graph)
+        self.design_list = design_list
+        self.eval_core = eval_core
+
+
+    def __len__(self):
+        n = len(self.design_list)
+        return n * (n-1) // 2
+
+    def _get_paired_idx(self):
+        # imagine an upper triangular matric of pairs
+        # select row r = rand(0, n-2), excluding r_{n-1}
+        # then select the col = rand(r+1, n)
+        n = len(self.design_list)
+        idx_a = np.random.randint(n - 1)
+        idx_b = np.random.randint(idx_a + 1, n)
+
+        if np.random.rand() < 0.5:
+            idx_a, idx_b = idx_b, idx_a
+
+        return idx_a, idx_b
+
+    def __getitem__(self, idx):
+
+        idx_a, idx_b = self._get_paired_idx()
+
+        dsn_a = self.design_list[idx_a]
+        dsn_b = self.design_list[idx_b]
+
+        input_a = self.input_handler.get_input_repr(dict(params=dsn_a.value_dict))
+        input_b = self.input_handler.get_input_repr(dict(params=dsn_b.value_dict))
+
+        label = {}
+        for kwrd in self.eval_core.spec_range:
+            label[kwrd] = torch.tensor(is_x_better_than_y(eval_core=self.eval_core,
+                                                              x=dsn_a.specs[kwrd],
+                                                              y=dsn_b.specs[kwrd],
+                                                              kwrd=kwrd)).long()
+
+            # if kwrd in ('gain', 'ugbw', 'pm', 'psrr', 'cmrr'):
+            #     label[kwrd] = torch.tensor(dsn_a.specs[kwrd] > dsn_b.specs[kwrd]).long()
+            # else:
+            #     label[kwrd] = torch.tensor(dsn_a.specs[kwrd] <= dsn_b.specs[kwrd]).long()
+
+        return dict(input_a=input_a, input_b=input_b, **label)
+    
 
 class SimpleModel(Model):
 
@@ -33,19 +84,20 @@ class SimpleModel(Model):
                  num_params_per_design,
                  spec_kwrd_list,
                  logger,
-                 compare_nn_hidden_dim_list,
-                 feat_ext_hidden_dim_list,
                  learning_rate=None,
+                #  compare_nn_hidden_dim_list,
+                #  feat_ext_hidden_dim_list,
                  **kwargs,
                  ):
         Model.__init__(self, **kwargs)
+        self.kwargs = kwargs
         self.seed = kwargs.get('seed', None)
         self.num_params_per_design = num_params_per_design
         self.spec_kwrd_list = spec_kwrd_list
-        self.feat_ext_dim_list = [num_params_per_design] + feat_ext_hidden_dim_list
-        self.compare_nn_dim_list = \
-            [2*feat_ext_hidden_dim_list[-1]] + compare_nn_hidden_dim_list + [2]
-        self.lr = learning_rate
+        # self.feat_ext_dim_list = [num_params_per_design] + feat_ext_hidden_dim_list
+        # self.compare_nn_dim_list = \
+        #     [2*feat_ext_hidden_dim_list[-1]] + compare_nn_hidden_dim_list + [2]
+        self.lr = learning_rate 
         self.logger = logger
 
         self.evaluate_flag = True if 'eval_save_to_path' in kwargs.keys() else False
@@ -103,31 +155,30 @@ class SimpleModel(Model):
         if self.seed is not None:
             self._set_seed(self.seed)
 
-        # TODO
-        gnn_ckpt = 'gnn_ckpt/33c8jvqf/checkpoints/last.ckpt'
-        # gnn_ckpt = ''
+        gnn_ckpt = self.kwargs.get('gnn_ckpt', '')
         self.is_graph = bool(gnn_ckpt)
+        dropout = 1 - self.kwargs.get('keep_prob')
 
         if gnn_ckpt:
             feature_ext_config = dict(
                 gnn_ckpt_path=gnn_ckpt,
-                output_features=256, #self.conf['feature_ext_out_dim'],
-                rand_init=False, #self.conf['rand_init'],
-                freeze=False, #self.conf['freeze'],
+                output_features=self.kwargs['feat_out_dim'],
+                rand_init=self.kwargs.get('rand_init', False),
+                freeze=False,
             )
         else:
             feature_ext_config = dict(
-                input_features=8,
-                output_features=20, # 256, #20,
-                hidden_dim=20, #256, #20,
-                n_layers=2,
-                drop_out=0.2,
+                input_features=self.num_params_per_design,
+                output_features=self.kwargs['feat_out_dim'],
+                hidden_dim=self.kwargs['feat_hdim'],
+                n_layers=self.kwargs['feat_nlayer'],
+                drop_out=dropout,
             )
 
         comparison_config = dict(
-            hidden_dim=20,
-            n_layers=1,
-            drop_out=0.2, #0.1, #0.2,
+            hidden_dim=self.kwargs['comp_hdim'],
+            n_layers=self.kwargs['comp_nlayer'],
+            drop_out=dropout,
         )
 
         self.nn = BagNetComparisonModel(
@@ -175,10 +226,6 @@ class SimpleModel(Model):
                 if rnd < 0.5:
                     nn_input1.append(train_db[i].value_dict)
                     nn_input2.append(train_db[j].value_dict)
-                    # nn_input1.append(train_db[i])
-                    # nn_input2.append(train_db[j])
-                    # nn_input1.append(list(train_db[i].value_dict.values()))
-                    # nn_input2.append(list(train_db[j].value_dict.values()))
                     for kwrd in self.spec_kwrd_list:
                         label = 1 if is_x_better_than_y(eval_core=eval_core,
                                                         x=train_db[i].specs[kwrd],
@@ -188,23 +235,12 @@ class SimpleModel(Model):
                 else:
                     nn_input1.append(train_db[j].value_dict)
                     nn_input2.append(train_db[i].value_dict)
-                    # nn_input1.append(train_db[j])
-                    # nn_input2.append(train_db[i])
-                    # nn_input1.append(list(train_db[j].value_dict.values()))
-                    # nn_input2.append(list(train_db[i].value_dict.values()))
                     for kwrd in self.spec_kwrd_list:
                         label = 0 if is_x_better_than_y(eval_core=eval_core,
                                                         x=train_db[i].specs[kwrd],
                                                         y=train_db[j].specs[kwrd],
                                                         kwrd=kwrd) else 1
                         category[kwrd].append(label)
-
-        # for kwrd in self.spec_kwrd_list:
-        #     nn_labels[kwrd] = np.zeros((len(category[kwrd]), 2))
-        #     nn_labels[kwrd][np.arange(len(category[kwrd])), category[kwrd]] = 1
-
-        # nn_input1 = np.array(nn_input1)
-        # nn_input2 = np.array(nn_input2)
 
         self.logger.info(f"Dataset size: {len(db)}")
         self.logger.info(f"K : {k}")
@@ -268,10 +304,14 @@ class SimpleModel(Model):
         return {'loss': loss, **acc}
 
 
-    def train(self, data_set, batch_size, ngrad_step_per_run, ckpt_step, log_step):
-
-        train_set = BagNetOnlineDataset(**data_set['training_ds'], is_graph=self.is_graph)
-        valid_set = BagNetOnlineDataset(**data_set['validation_ds'], is_graph=self.is_graph)
+    def train(self, db, eval_core, batch_size, ngrad_step_per_run, ckpt_step, log_step):
+        
+        dataset = SimpleBagNetDataset(db, eval_core=eval_core, is_graph=self.is_graph)
+        # split is not really important here since we randomly generate index on the fly
+        train_set = dataset
+        valid_set = Subset(train_set, list(range(1000)))
+        # train_set = BagNetOnlineDataset(**data_set['training_ds'], is_graph=self.is_graph)
+        # valid_set = BagNetOnlineDataset(**data_set['validation_ds'], is_graph=self.is_graph)
 
         # mean = self.mean = np.concatenate([data_set['training_ds']['input_a'], data_set['training_ds']['input_b']], 0).mean(0)
         # std = self.std = np.concatenate([data_set['training_ds']['input_a'], data_set['training_ds']['input_b']], 0).std(0)
@@ -357,14 +397,14 @@ class SimpleModel(Model):
                             valid_acc_list[k].append(ret_vbatch[f'acc_{k}'].item())
 
                     self.logger.log_text(10*"-", stream_to_stdout=False)
-                    self.logger.log_text(f"[iter {iter_cnt}] total_loss: {np.mean(total_loss_list)}", stream_to_stdout=False)
+                    self.logger.log_text(f"[iter {iter_cnt}] total_loss: {np.mean(total_loss_list)}", stream_to_stdout=True)
                     desc_map['log_loss'] = np.mean(total_loss_list)
                     for kwrd in self.spec_kwrd_list:
                         # self.logger.log_text(f"{kwrd}")
                         # self.logger.log_text(f"[{kwrd}] loss: {np.mean(loss_list[kwrd])}")
                         self.logger.log_text(f"[{kwrd:10}] "
                                             f"train_acc = {np.mean(train_acc_list[kwrd]) * 100:.2f}%,"
-                                            f"valid_acc = {np.mean(valid_acc_list[kwrd]) * 100:.2f}%", stream_to_stdout=False)
+                                            f"valid_acc = {np.mean(valid_acc_list[kwrd]) * 100:.2f}%", stream_to_stdout=True)
 
                     desc_map['valid_acc_all'] = np.mean(valid_acc_list['all'])
                     # reset the list of the next round until we log again
@@ -382,7 +422,7 @@ class SimpleModel(Model):
                 iter_cnt += 1
             
 
-    def query(self, input1, input2, debug=False):
+    def query(self, input1, input2):
         input_a = self.input_handler.get_input_repr(dict(params=input1.value_dict))
         input_b = self.input_handler.get_input_repr(dict(params=input2.value_dict))
 
@@ -414,9 +454,6 @@ class SimpleModel(Model):
         for key in self.spec_kwrd_list:
             predictions[key] = model_output['outputs'][key]['prob'].detach().cpu().numpy()
 
-        if debug:
-            breakpoint()
-            
         return predictions
 
     # def evaluate(self):

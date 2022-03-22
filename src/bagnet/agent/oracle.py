@@ -12,8 +12,8 @@ from ..util.ga import is_x_better_than_y
 
 class OracleAgent(Agent):
 
-    def __init__(self, fname: Union[str, Path]):
-        Agent.__init__(self, fname)
+    def __init__(self, fname: Union[str, Path], seed=0):
+        Agent.__init__(self, fname, seed)
         # get the parameters in agent_params
         self.max_n_retraining = self.specs['max_n_steps']
 

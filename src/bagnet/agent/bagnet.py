@@ -13,8 +13,8 @@ from bagnet.model import Model
 
 class BagNetAgent(Agent):
 
-    def __init__(self, fname):
-        Agent.__init__(self, fname)
+    def __init__(self, fname, seed=0):
+        Agent.__init__(self, fname, seed)
 
         model_cls = cast(Type[Model], import_class(self.specs['model_cls']))
         self.model = model_cls(num_params_per_design=len(self.bb_env.params),
@@ -50,8 +50,8 @@ class BagNetAgent(Agent):
 
     def train(self):
         t_minus = time.time()
-        ds = self.model.get_train_valid_ds(self.db, self.k, self.bb_env, self.valid_frac)
-        self.model.train(ds, self.batch_size, self.ngrad_update_per_iter, self.ckpt_step, self.display_step)
+        # ds = self.model.get_train_valid_ds(self.db, self.k, self.bb_env, self.valid_frac)
+        self.model.train(self.db, self.bb_env, self.batch_size, self.ngrad_update_per_iter, self.ckpt_step, self.display_step)
         t_plus = time.time()
         self.n_training += 1
         self.training_time += (t_plus - t_minus)
@@ -116,7 +116,7 @@ class BagNetAgent(Agent):
                 if is_new_design_better:
                     offsprings.append(new_design)
                 elif random.random() < self.eps:
-                    print('Ignored the model because of eps greedy!')
+                    self.log('Ignored the model because of eps greedy!')
                     offsprings.append(new_design)
                 
                 deletion_e = time.time()

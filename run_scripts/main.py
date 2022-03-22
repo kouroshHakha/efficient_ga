@@ -21,7 +21,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('fname', type=str, help='the main yaml file that sets the settings')
-    parser.add_argument('--seed', '-s', type=int, default=10,
+    parser.add_argument('--seed', '-s', type=int, default=0,
                         help='the main yaml file that sets the settings')
     parser.add_argument('--plot', '-p', action='store_true', default=False,
                         help='True to plot the dbs')
@@ -31,7 +31,7 @@ if __name__ == '__main__':
     setting = read_yaml(args.fname)
 
     agent_cls: Type[Agent] = import_class(setting['agent_cls'])
-    agent: Agent = agent_cls(args.fname)
+    agent: Agent = agent_cls(args.fname, args.seed)
 
     agent.main()
     # Hacky plotting

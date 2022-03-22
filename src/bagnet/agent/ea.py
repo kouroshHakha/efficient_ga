@@ -12,7 +12,7 @@ from .base import Agent
 
 class EvoAgent(Agent):
 
-    def __init__(self, fname: Union[str, Path]) -> None:
+    def __init__(self, fname: Union[str, Path], seed=0) -> None:
         """
 
         Parameters
@@ -23,7 +23,7 @@ class EvoAgent(Agent):
                 k: number of k sample to consider when forming heuristics in decision box ...
                 max_n_steps: maximum number of iterations (i.e. generations)
         """
-        Agent.__init__(self, fname)
+        Agent.__init__(self, fname, seed)
         self.k = self.specs['k']
         self.max_n_steps = self.specs['max_n_steps']
         self.n_new_samples = self.specs['n_new_samples']

@@ -24,7 +24,7 @@ from ..decisionbox import DecisionBox
 
 class Agent:
 
-    def __init__(self, fname: Union[str, Path]) -> None:
+    def __init__(self, fname: Union[str, Path], seed=0) -> None:
         """
         Parameters
         ----------
@@ -41,7 +41,7 @@ class Agent:
 
         _params = read_yaml(fname)
         self.specs = _params['agent_params']
-        self.seed = self.specs['seed']
+        self.seed = seed
         self._set_seed(self.seed)
 
         self.db: Database = Database(Design, allow_repeat=False)
