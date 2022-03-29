@@ -17,9 +17,10 @@ from torch.utils.data import Subset
 from torch.utils.data import DataLoader as VecLoader
 from torch_geometric.loader import DataLoader as GNNLoader
 from torch_geometric.loader.dataloader import Collater
+from torch_geometric.data import Data
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from cgl.bagnet_gnn.model import BagNetComparisonModel
+from cgl.bagnet_gnn.model import BagNetComparisonModel, BagNetComparisonModel_v2
 from cgl.bagnet_gnn.data import BagNetDataset, BagNetOnlineDataset, InputHandler
 
 class ModelCheckpointNoOverride(ModelCheckpoint):
@@ -27,6 +28,23 @@ class ModelCheckpointNoOverride(ModelCheckpoint):
     def _del_model(self, filepath: str) -> None:
         pass
 
+
+def map_to_device(container, device):
+    ret = None
+    if isinstance(container, dict):
+        ret = {}
+        for key in container:
+            ret[key] = map_to_device(container[key], device)
+    elif isinstance(container, list):
+        ret = []
+        for item in container:
+            ret.append(map_to_device(item, device))
+    elif isinstance(container, (torch.Tensor, Data)):
+        ret = container.clone().to(device)
+    else:
+        raise ValueError(f'type {type(container)} is not supported.')
+    return ret
+    
 
 class SimpleBagNetDataset(BagNetDataset):
             
@@ -63,17 +81,15 @@ class SimpleBagNetDataset(BagNetDataset):
         input_a = self.input_handler.get_input_repr(dict(params=dsn_a.value_dict))
         input_b = self.input_handler.get_input_repr(dict(params=dsn_b.value_dict))
 
-        label = {}
+        label = {'a_better_than_b': {}, 'a_meets_specs': {}, 'b_meets_specs': {}}
         for kwrd in self.eval_core.spec_range:
-            label[kwrd] = torch.tensor(is_x_better_than_y(eval_core=self.eval_core,
-                                                              x=dsn_a.specs[kwrd],
-                                                              y=dsn_b.specs[kwrd],
-                                                              kwrd=kwrd)).long()
 
-            # if kwrd in ('gain', 'ugbw', 'pm', 'psrr', 'cmrr'):
-            #     label[kwrd] = torch.tensor(dsn_a.specs[kwrd] > dsn_b.specs[kwrd]).long()
-            # else:
-            #     label[kwrd] = torch.tensor(dsn_a.specs[kwrd] <= dsn_b.specs[kwrd]).long()
+            if kwrd in ('gain', 'ugbw', 'pm', 'psrr', 'cmrr'):
+                label['a_better_than_b'][kwrd] = torch.tensor(dsn_a.specs[kwrd] > dsn_b.specs[kwrd]).long()
+            else:
+                label['a_better_than_b'][kwrd] = torch.tensor(dsn_a.specs[kwrd] <= dsn_b.specs[kwrd]).long()
+            label['a_meets_specs'][kwrd] = torch.tensor(self.eval_core.compute_penalty(dsn_a.specs[kwrd], kwrd)[0] == 0).long()
+            label['b_meets_specs'][kwrd] = torch.tensor(self.eval_core.compute_penalty(dsn_b.specs[kwrd], kwrd)[0] == 0).long()
 
         return dict(input_a=input_a, input_b=input_b, **label)
     
@@ -164,7 +180,7 @@ class SimpleModel(Model):
                 gnn_ckpt_path=gnn_ckpt,
                 output_features=self.kwargs['feat_out_dim'],
                 rand_init=self.kwargs.get('rand_init', False),
-                freeze=False,
+                freeze=self.kwargs.get('freeze', False),
             )
         else:
             feature_ext_config = dict(
@@ -181,10 +197,24 @@ class SimpleModel(Model):
             drop_out=dropout,
         )
 
-        self.nn = BagNetComparisonModel(
+        meet_spec_config = dict(
+            hidden_dim=self.kwargs['meet_spec_hdim'],
+            n_layers=self.kwargs['meet_spec_nlayer'],
+            drop_out=dropout,
+        )
+
+        # self.nn = BagNetComparisonModel(
+        #     comparison_kwrds=self.spec_kwrd_list,
+        #     feature_exractor_config=feature_ext_config,
+        #     comparison_model_config=comparison_config,
+        #     is_gnn=self.is_graph,
+        # )
+
+        self.nn = BagNetComparisonModel_v2(
             comparison_kwrds=self.spec_kwrd_list,
             feature_exractor_config=feature_ext_config,
             comparison_model_config=comparison_config,
+            meet_spec_config=meet_spec_config,
             is_gnn=self.is_graph,
         )
 
@@ -284,16 +314,23 @@ class SimpleModel(Model):
         loss = torch.tensor(0., device=self.device)
         total_heads = len(self.nn.comparison_heads)
         for key in self.nn.comparison_heads:
-            loss += model_output['losses'][key] / total_heads
+            # loss += model_output['losses'][key] / total_heads
+            loss += model_output['losses']['comp'][key] / total_heads
 
-        acc = {}
+        for key in self.nn.meet_spec_nn:
+            loss += model_output['losses']['meet_spec'][key] / total_heads
+
+        acc = {'acc_comp': {}, 'acc_meet_spec': {}}
         all_correct = None
         for key in self.nn.comparison_heads:
-            pred = model_output['outputs'][key]['prob'].argmax(-1)
-            target = batch[key]
 
-            cond = pred == target
-            acc[f'acc_{key}'] = cond.float().mean(0).detach()
+            a_better_than_b = (model_output['outputs']['a_better_than_b'][key]['prob'].argmax(-1) == batch['a_better_than_b'][key])
+            a_meets_specs = (model_output['outputs']['a_meets_specs'][key]['prob'].argmax(-1) == batch['a_meets_specs'][key])
+            b_meets_specs = (model_output['outputs']['b_meets_specs'][key]['prob'].argmax(-1) == batch['b_meets_specs'][key])
+            acc['acc_comp'][key] = a_better_than_b.float().mean().detach()
+            acc['acc_meet_spec'][key] = ((a_meets_specs.float().mean() + b_meets_specs.float().mean()) / 2).detach()
+
+            cond = a_better_than_b & a_meets_specs
             if all_correct is None:
                 all_correct = cond
             else:
@@ -355,7 +392,8 @@ class SimpleModel(Model):
 
         optimizer = Adam(self.nn.parameters(), lr=self.lr)
 
-        train_acc_list = {k: [] for k in self.spec_kwrd_list}
+        train_acc_list = {f'acc_comp_{k}': [] for k in self.spec_kwrd_list}
+        train_acc_list.update(**{f'acc_meet_spec_{k}': [] for k in self.spec_kwrd_list})
         total_loss_list = []
 
         pbar = tqdm.tqdm(range(ngrad_step_per_run), total=ngrad_step_per_run)
@@ -372,7 +410,7 @@ class SimpleModel(Model):
                 self.nn.train()
                 optimizer.zero_grad()
                 # clone this so that any in-place op on the batch values would not persist
-                batch = {k: v.clone().to(self.device) for k, v in batch.items()}
+                batch = map_to_device(batch, self.device)
                 ret = self.ff(batch)
                 ret['loss'].backward()
                 optimizer.step()
@@ -380,35 +418,37 @@ class SimpleModel(Model):
                 desc_map['loss'] = ret['loss'].item()
                 total_loss_list.append(ret['loss'].item())
                 for k in self.spec_kwrd_list:
-                    train_acc_list[k].append(ret[f'acc_{k}'].item())
-
+                    train_acc_list[f'acc_comp_{k}'].append(ret['acc_comp'][k].item())
+                    train_acc_list[f'acc_meet_spec_{k}'].append(ret['acc_meet_spec'][k].item())
 
                 if iter_cnt % ckpt_step == 0:
                     self.logger.store_model(self.nn)
                 if iter_cnt % log_step == 0:
                     # running validation
                     self.nn.eval()
-                    valid_acc_list = {k: [] for k in self.spec_kwrd_list}
+                    valid_acc_list = {f'acc_comp_{k}': [] for k in self.spec_kwrd_list}
+                    valid_acc_list.update(**{f'acc_meet_spec_{k}': [] for k in self.spec_kwrd_list})
                     valid_acc_list.update(all=[])
                     for vbatch in valid_loader:
-                        vbatch = {k: v.to(self.device) for k, v in vbatch.items()}
+                        vbatch = map_to_device(vbatch, self.device)
                         ret_vbatch = self.ff(vbatch)
-                        for k in valid_acc_list:
-                            valid_acc_list[k].append(ret_vbatch[f'acc_{k}'].item())
+                        for k in self.spec_kwrd_list:
+                            valid_acc_list[f'acc_comp_{k}'].append(ret_vbatch['acc_comp'][k].item())
+                            valid_acc_list[f'acc_meet_spec_{k}'].append(ret_vbatch['acc_meet_spec'][k].item())
+                        valid_acc_list['all'].append(ret_vbatch['acc_all'].item())
 
                     self.logger.log_text(10*"-", stream_to_stdout=False)
                     self.logger.log_text(f"[iter {iter_cnt}] total_loss: {np.mean(total_loss_list)}", stream_to_stdout=True)
                     desc_map['log_loss'] = np.mean(total_loss_list)
-                    for kwrd in self.spec_kwrd_list:
-                        # self.logger.log_text(f"{kwrd}")
-                        # self.logger.log_text(f"[{kwrd}] loss: {np.mean(loss_list[kwrd])}")
+                    for kwrd in train_acc_list:
                         self.logger.log_text(f"[{kwrd:10}] "
                                             f"train_acc = {np.mean(train_acc_list[kwrd]) * 100:.2f}%,"
                                             f"valid_acc = {np.mean(valid_acc_list[kwrd]) * 100:.2f}%", stream_to_stdout=True)
 
                     desc_map['valid_acc_all'] = np.mean(valid_acc_list['all'])
                     # reset the list of the next round until we log again
-                    train_acc_list = {k: [] for k in self.spec_kwrd_list}
+                    train_acc_list = {f'acc_comp_{k}': [] for k in self.spec_kwrd_list}
+                    train_acc_list.update(**{f'acc_meet_spec_{k}': [] for k in self.spec_kwrd_list})
                     total_loss_list = []
 
                 desc = ''
@@ -426,11 +466,6 @@ class SimpleModel(Model):
         input_a = self.input_handler.get_input_repr(dict(params=input1.value_dict))
         input_b = self.input_handler.get_input_repr(dict(params=input2.value_dict))
 
-        # input_a = torch.as_tensor((np.array(input1) - self.mean) / self.std)
-        # input_b = torch.as_tensor((np.array(input2) - self.mean) / self.std)
-
-        # input_a = torch.as_tensor((np.array(list(input1.value_dict.values())) - self.mean) / self.std)
-        # input_b = torch.as_tensor((np.array(list(input2.value_dict.values())) - self.mean) / self.std)
 
         if self.is_graph:
             batch = Collater(follow_batch=None, exclude_keys=None)(
@@ -448,72 +483,13 @@ class SimpleModel(Model):
             )
 
         self.nn.eval()
-        model_output = self.nn(batch) 
+        model_output = self.nn(batch, compute_loss=False) 
 
-        predictions = {}
+        predictions = {'a_better_than_b': {}, 'a_meets_specs': {}, 'b_meets_specs': {}}
         for key in self.spec_kwrd_list:
-            predictions[key] = model_output['outputs'][key]['prob'].detach().cpu().numpy()
+            predictions['a_better_than_b'][key] = model_output['outputs']['a_better_than_b'][key]['prob'].detach().cpu().numpy()
+            predictions['a_meets_specs'][key] = model_output['outputs']['a_meets_specs'][key]['prob'].detach().cpu().numpy()
+            predictions['b_meets_specs'][key] = model_output['outputs']['b_meets_specs'][key]['prob'].detach().cpu().numpy()
 
         return predictions
 
-    # def evaluate(self):
-    #     "A function that evaluates the nn with oracle data to see how they compare"
-    #     assert self.evaluate_flag, 'To evaluate the evalute flage must be set to True'
-
-    #     oracle_feed_dict = {
-    #         self.input1: self.oracle_input1,
-    #         self.input2: self.oracle_input2,
-    #     }
-
-    #     for kwrd, tensor in self.true_labels.items():
-    #         oracle_feed_dict[tensor] = self.labels[kwrd]
-
-    #     accuracy, predictions = self.sess.run([self.accuracy, self.out_predictions],
-    #                                           feed_dict=oracle_feed_dict)
-
-    #     # see if nn says input1 is better than input2 for all rows according to the critical specs
-    #     nn_is_1_better = []
-    #     for i in range(len(self.df)):
-    #         is_1_better = all([random.random() > predictions[kwrd][i][0]
-    #                            for kwrd in self.df['critical_specs'][i]])
-    #         nn_is_1_better.append(is_1_better)
-
-
-    #     # compute all accuracy numbers (oracle_nn): false_false, true_true, false_true, true_false
-    #     ff, tt = 0, 0
-    #     ft, tf = 0, 0
-    #     for nn_vote, oracle_vote in zip(nn_is_1_better, self.oracle_is_1_better):
-    #         if not nn_vote and not oracle_vote:
-    #             ff+=1
-    #         elif nn_vote and oracle_vote:
-    #             tt+=1
-    #         elif not nn_vote and oracle_vote:
-    #             tf+=1
-    #         elif nn_vote and not oracle_vote:
-    #             ft+=1
-    #     total_accuracy = (tt+ff)/(tt+ff+tf+ft)
-    #     # how many of those that oracle says are good nn says are good: very important, should be 1
-    #     a1 = tt/(tf+tt)
-    #     # how many of those that nn says good are actually good: very important, should be 1,
-    #     a2 = tt/(ft+tt)
-    #     # indicates that nn doesn't add useless data
-    #     # how many of those that oracle says are bad nn says are bad: should be 1, indicates that
-    #     a3 = ff/(ff+ft)
-    #     #  nn can prune out the space efficiently
-    #     # how many of those that nn says bad are actually bad: should be 1
-    #     a4 = ff/(tf+ff)
-
-    #     accuracy["total_acc"] = total_accuracy
-    #     accuracy["a1"] = a1
-    #     accuracy["a2"] = a2
-    #     accuracy["a3"] = a3
-    #     accuracy["a4"] = a4
-    #     accuracy["tt"] = tt
-    #     accuracy["ff"] = ff
-    #     accuracy["tf"] = tf
-    #     accuracy["ft"] = ft
-    #     self.df_accuracy = self.df_accuracy.append(accuracy, ignore_index=True)
-
-    #     self.logger.store_db(self.df_accuracy, fpath=os.path.join(self.eval_save_to,
-    #                                                               self.file_base_name + '.pkl'))
-    #     self.logger.log_text(accuracy, stream_to_stdout=False, fpath=self.acc_txt_file)
