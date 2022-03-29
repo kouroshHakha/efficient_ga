@@ -170,8 +170,17 @@ class DecisionBox:
     def accept_new_design(self, prediction):
         # sample from output distribution and see if new design in better than ref design in almost
         # all critical design metrics
-        is_new_design_better = all([random.random() > prediction[kwrd][0][0] for kwrd in
-                                    self.critical_specs])
+        # is_new_design_better = all([random.random() > prediction[kwrd][0][0] for kwrd in
+        #                             self.critical_specs])
+
+        acceptance_criteria = []
+        for kwrd in self.critical_specs:
+            rnd = random.random()
+            a_meets_specs =  rnd > prediction['a_meets_specs'][kwrd][0][0]
+            a_better_than_b = rnd > prediction['a_better_than_b'][kwrd][0][0]
+            acceptance_criteria.append(a_meets_specs or a_better_than_b)
+        is_new_design_better = all(acceptance_criteria)
+
         # if we want to account uncertainty we only reject designs that we are sure are worst than
         # the reference design with 20% confidence percentage
         # is_new_design_worst = any([(random.random() < prediction[kwrd][0][0] and
