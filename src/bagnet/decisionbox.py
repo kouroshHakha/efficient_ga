@@ -168,11 +168,10 @@ class DecisionBox:
         #     return [], True
 
     def accept_new_design(self, prediction):
-        # sample from output distribution and see if new design in better than ref design in almost
-        # all critical design metrics
-        # is_new_design_better = all([random.random() > prediction[kwrd][0][0] for kwrd in
-        #                             self.critical_specs])
-
+        # accept a new design if its prediction indicates that it meets the specs
+        # if it does not meet the specs is it better than the reference design
+        # decoupling this decision boundaries makes data labels less ambigous 
+        # since the network is symmetric
         acceptance_criteria = []
         for kwrd in self.critical_specs:
             rnd = random.random()
@@ -181,10 +180,4 @@ class DecisionBox:
             acceptance_criteria.append(a_meets_specs or a_better_than_b)
         is_new_design_better = all(acceptance_criteria)
 
-        # if we want to account uncertainty we only reject designs that we are sure are worst than
-        # the reference design with 20% confidence percentage
-        # is_new_design_worst = any([(random.random() < prediction[kwrd][0][0] and
-        #                             prediction[kwrd][0][0] < 0.2) for kwrd in self.critical_specs])
-        # is_new_design_worst = all([prediction[kwrd][0][0] < 0.2 for kwrd in self.critical_specs])
-        # is_new_design_better = not is_new_design_worst
         return is_new_design_better
